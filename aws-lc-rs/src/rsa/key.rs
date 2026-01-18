@@ -158,9 +158,20 @@ impl KeyPair {
     /// Parses a DER-encoded `RSAPrivateKey` structure (RFC 8017).
     ///
     /// # Errors
-    /// `error:KeyRejected` on error.
+    /// `error::KeyRejected` on error.
     pub fn from_der(input: &[u8]) -> Result<Self, KeyRejected> {
         let key = encoding::rfc8017::decode_private_key_der(input)?;
+        Self::new(key)
+    }
+
+    /// Reconstruct an RSA keypair from components.
+    ///
+    /// # Errors
+    /// `error::KeyRejected` on error.
+    pub fn from_components<B: AsRef<[u8]> + Debug>(
+        components: &super::KeyPairComponents<B>,
+    ) -> Result<Self, KeyRejected> {
+        let key = components.build_rsa()?;
         Self::new(key)
     }
 

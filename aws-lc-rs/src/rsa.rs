@@ -82,6 +82,139 @@ pub use self::signature::RsaParameters;
 
 pub(crate) use self::signature::RsaVerificationAlgorithmId;
 
+#[cfg(feature = "ring-io")]
+use crate::aws_lc::{
+    EVP_PKEY_assign_RSA, EVP_PKEY_new, RSA_new, RSA_set0_crt_params, RSA_set0_factors,
+    RSA_set0_key, EVP_PKEY,
+};
+#[cfg(feature = "ring-io")]
+use crate::ptr::{DetachableLcPtr, LcPtr};
+
+#[allow(non_snake_case)] // Ring API compatibility
+#[cfg(feature = "ring-io")]
+#[derive(Debug)]
+/// Low-level API for RSA keypairs.
+///
+/// This can be used to decode formats other than PKCS#8, such as JWKs.
+pub struct KeyPairComponents<B: AsRef<[u8]> + std::fmt::Debug> {
+    /// The public key components.
+    pub public_key: PublicKeyComponents<B>,
+    /// The private exponent, encoded in big-endian bytes without leading zeros.
+    pub d: B,
+    /// The first prime factor, encoded in big-endian bytes without leading zeros.
+    pub p: B,
+    /// The second prime factor, encoded in big-endian bytes without leading zeros.
+    pub q: B,
+    /// The first prime factor's Chinese remainder theorem exponent, encoded in big-endian bytes
+    /// without leading zeros.
+    pub dP: B,
+    /// The second prime factor's Chinese remainder theorem exponent, encoded in big-endian bytes
+    /// without leading zeros.
+    pub dQ: B,
+    /// The first Chinese remainder theorem coefficient, encoded in big-endian bytes without leading
+    /// zeros.
+    pub qInv: B,
+}
+
+#[cfg(feature = "ring-io")]
+impl<B: AsRef<[u8]> + std::fmt::Debug> KeyPairComponents<B> {
+    fn build_rsa(&self) -> Result<LcPtr<EVP_PKEY>, ()> {
+        // Public key components, kanged from ./rsa/key.rs > PublicKeyComponents::build_rsa
+        let n_bytes = self.public_key.n.as_ref();
+        if n_bytes.is_empty() || n_bytes[0] == 0u8 {
+            return Err(());
+        }
+        let mut n_bn = DetachableLcPtr::try_from(n_bytes)?;
+
+        let e_bytes = self.public_key.e.as_ref();
+        if e_bytes.is_empty() || e_bytes[0] == 0u8 {
+            return Err(());
+        }
+        let mut e_bn = DetachableLcPtr::try_from(e_bytes)?;
+        // Private key components, constructed by analogy
+        let d_bytes = self.d.as_ref();
+        if d_bytes.is_empty() || d_bytes[0] == 0u8 {
+            return Err(());
+        }
+        let mut d_bn = DetachableLcPtr::try_from(d_bytes)?;
+
+        let p_bytes = self.p.as_ref();
+        if p_bytes.is_empty() || p_bytes[0] == 0u8 {
+            return Err(());
+        }
+        let mut p_bn = DetachableLcPtr::try_from(p_bytes)?;
+
+        let q_bytes = self.q.as_ref();
+        if q_bytes.is_empty() || q_bytes[0] == 0u8 {
+            return Err(());
+        }
+        let mut q_bn = DetachableLcPtr::try_from(q_bytes)?;
+
+        let dmp1_bytes = self.dP.as_ref();
+        if dmp1_bytes.is_empty() || dmp1_bytes[0] == 0u8 {
+            return Err(());
+        }
+        let mut dmp1_bn = DetachableLcPtr::try_from(dmp1_bytes)?;
+
+        let dmq1_bytes = self.dQ.as_ref();
+        if dmq1_bytes.is_empty() || dmq1_bytes[0] == 0u8 {
+            return Err(());
+        }
+        let mut dmq1_bn = DetachableLcPtr::try_from(dmq1_bytes)?;
+
+        let iqmp_bytes = self.qInv.as_ref();
+        if iqmp_bytes.is_empty() || iqmp_bytes[0] == 0u8 {
+            return Err(());
+        }
+        let mut iqmp_bn = DetachableLcPtr::try_from(iqmp_bytes)?;
+
+        let mut rsa = DetachableLcPtr::new(unsafe { RSA_new() })?;
+
+        if 1 != unsafe {
+            RSA_set0_key(
+                rsa.as_mut_ptr(),
+                n_bn.as_mut_ptr(),
+                e_bn.as_mut_ptr(),
+                d_bn.as_mut_ptr(),
+            )
+        } {
+            return Err(());
+        }
+        n_bn.detach();
+        e_bn.detach();
+        d_bn.detach();
+
+        if 1 != unsafe { RSA_set0_factors(rsa.as_mut_ptr(), p_bn.as_mut_ptr(), q_bn.as_mut_ptr()) }
+        {
+            return Err(());
+        }
+        p_bn.detach();
+        q_bn.detach();
+
+        if 1 != unsafe {
+            RSA_set0_crt_params(
+                rsa.as_mut_ptr(),
+                dmp1_bn.as_mut_ptr(),
+                dmq1_bn.as_mut_ptr(),
+                iqmp_bn.as_mut_ptr(),
+            )
+        } {
+            return Err(());
+        }
+        dmp1_bn.detach();
+        dmq1_bn.detach();
+        iqmp_bn.detach();
+
+        let mut pkey = LcPtr::new(unsafe { EVP_PKEY_new() })?;
+        if 1 != unsafe { EVP_PKEY_assign_RSA(pkey.as_mut_ptr(), rsa.as_mut_ptr()) } {
+            return Err(());
+        }
+        rsa.detach();
+
+        Ok(pkey)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "fips")]

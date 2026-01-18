@@ -111,6 +111,17 @@ impl PrivateDecryptingKey {
         Ok(Self::new(key)?)
     }
 
+    /// Reconstruct a `PrivateDecryptingKey` from components.
+    ///
+    /// # Errors
+    /// `error::KeyRejected` on error.
+    pub fn from_components<B: AsRef<[u8]> + Debug>(
+        components: &super::KeyPairComponents<B>,
+    ) -> Result<Self, KeyRejected> {
+        let key = components.build_rsa()?;
+        Ok(Self::new(key)?)
+    }
+
     /// Returns a boolean indicator if this RSA key is an approved FIPS 140-3 key.
     #[cfg(feature = "fips")]
     #[must_use]
