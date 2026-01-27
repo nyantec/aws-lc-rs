@@ -70,6 +70,9 @@ mod encryption;
 pub(crate) mod key;
 pub(crate) mod signature;
 
+#[cfg(feature = "ring-io")]
+use std::fmt::Debug;
+
 pub use self::encryption::oaep::{
     OaepAlgorithm, OaepPrivateDecryptingKey, OaepPublicEncryptingKey, OAEP_SHA1_MGF1SHA1,
     OAEP_SHA256_MGF1SHA256, OAEP_SHA384_MGF1SHA384, OAEP_SHA512_MGF1SHA512,
@@ -96,28 +99,28 @@ use crate::ptr::{DetachableLcPtr, LcPtr};
 /// Low-level API for RSA keypairs.
 ///
 /// This can be used to decode formats other than PKCS#8, such as JWKs.
-pub struct KeyPairComponents<B: AsRef<[u8]> + std::fmt::Debug> {
+pub struct KeyPairComponents<Public: AsRef<[u8]> + Debug, Private: AsRef<[u8]> + Debug = Public> {
     /// The public key components.
-    pub public_key: PublicKeyComponents<B>,
+    pub public_key: PublicKeyComponents<Public>,
     /// The private exponent, encoded in big-endian bytes without leading zeros.
-    pub d: B,
+    pub d: Private,
     /// The first prime factor, encoded in big-endian bytes without leading zeros.
-    pub p: B,
+    pub p: Private,
     /// The second prime factor, encoded in big-endian bytes without leading zeros.
-    pub q: B,
+    pub q: Private,
     /// The first prime factor's Chinese remainder theorem exponent, encoded in big-endian bytes
     /// without leading zeros.
-    pub dP: B,
+    pub dP: Private,
     /// The second prime factor's Chinese remainder theorem exponent, encoded in big-endian bytes
     /// without leading zeros.
-    pub dQ: B,
+    pub dQ: Private,
     /// The first Chinese remainder theorem coefficient, encoded in big-endian bytes without leading
     /// zeros.
-    pub qInv: B,
+    pub qInv: Private,
 }
 
 #[cfg(feature = "ring-io")]
-impl<B: AsRef<[u8]> + std::fmt::Debug> KeyPairComponents<B> {
+impl<Private: AsRef<[u8]> + Debug, Public: AsRef<[u8]> + Debug> KeyPairComponents<Private, Public> {
     fn build_rsa(&self) -> Result<LcPtr<EVP_PKEY>, ()> {
         // Public key components, kanged from ./rsa/key.rs > PublicKeyComponents::build_rsa
         let n_bytes = self.public_key.n.as_ref();
