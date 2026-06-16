@@ -1117,7 +1117,7 @@ fn encrypting_keypair_debug() {
 
     let public_key = private_key.public_key();
 
-    assert_eq!("PublicEncryptingKey", format!("{public_key:?}"));
+    assert_eq!("PublicEncryptingKey { .. }", format!("{public_key:?}"));
 
     let oaep_private_key =
         OaepPrivateDecryptingKey::new(private_key.clone()).expect("oaep private key");
