@@ -111,7 +111,7 @@ impl OaepPublicEncryptingKey {
         ciphertext: &'ciphertext mut [u8],
         label: Option<&[u8]>,
     ) -> Result<&'ciphertext mut [u8], Unspecified> {
-        let mut pkey_ctx = self.public_key.0.create_EVP_PKEY_CTX()?;
+        let mut pkey_ctx = self.public_key.key.create_EVP_PKEY_CTX()?;
 
         if 1 != unsafe { EVP_PKEY_encrypt_init(pkey_ctx.as_mut_ptr()) } {
             return Err(Unspecified);
@@ -173,6 +173,27 @@ impl OaepPublicEncryptingKey {
     #[must_use]
     pub fn ciphertext_size(&self) -> usize {
         self.key_size_bytes()
+    }
+}
+
+#[cfg(feature = "ring-io")]
+impl OaepPublicEncryptingKey {
+    /// The public modulus (n).
+    #[must_use]
+    pub fn modulus(&self) -> crate::io::Positive<'_> {
+        self.public_key.modulus()
+    }
+
+    /// The public exponent (e).
+    #[must_use]
+    pub fn exponent(&self) -> crate::io::Positive<'_> {
+        self.public_key.exponent()
+    }
+
+    /// Returns the length in bytes of the public modulus.
+    #[must_use]
+    pub fn modulus_len(&self) -> usize {
+        self.public_key.modulus_len()
     }
 }
 

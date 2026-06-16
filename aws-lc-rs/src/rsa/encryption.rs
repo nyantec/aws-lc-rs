@@ -13,6 +13,13 @@ use crate::pkcs8::Version;
 use crate::ptr::LcPtr;
 use core::fmt::Debug;
 
+#[cfg(feature = "ring-io")]
+use crate::aws_lc::{RSA_get0_e, RSA_get0_n};
+#[cfg(feature = "ring-io")]
+use crate::io;
+#[cfg(feature = "ring-io")]
+use untrusted::Input;
+
 /// RSA Encryption Algorithm Identifier
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -154,7 +161,14 @@ impl Clone for PrivateDecryptingKey {
 }
 
 /// An RSA public key used for encrypting plaintext that is decrypted by a [`PrivateDecryptingKey`].
-pub struct PublicEncryptingKey(LcPtr<EVP_PKEY>);
+#[derive(Clone)]
+pub struct PublicEncryptingKey {
+    key: LcPtr<EVP_PKEY>,
+    #[cfg(feature = "ring-io")]
+    modulus: Box<[u8]>,
+    #[cfg(feature = "ring-io")]
+    exponent: Box<[u8]>,
+}
 
 // See thread-safety note on `PrivateDecryptingKey`.
 unsafe impl Send for PublicEncryptingKey {}
@@ -163,7 +177,27 @@ unsafe impl Sync for PublicEncryptingKey {}
 impl PublicEncryptingKey {
     pub(crate) fn new(evp_pkey: LcPtr<EVP_PKEY>) -> Result<Self, Unspecified> {
         Self::validate_key(&evp_pkey)?;
-        Ok(Self(evp_pkey))
+        #[cfg(feature = "ring-io")]
+        {
+            let pubkey = evp_pkey.as_const();
+            let pubkey = pubkey.get_rsa()?;
+            let modulus = pubkey
+                .project_const_lifetime(unsafe { |pubkey| RSA_get0_n(pubkey.as_const_ptr()) })?
+                .to_be_bytes()
+                .into_boxed_slice();
+            let exponent = pubkey
+                .project_const_lifetime(unsafe { |pubkey| RSA_get0_e(pubkey.as_const_ptr()) })?
+                .to_be_bytes()
+                .into_boxed_slice();
+            Ok(Self {
+                key: evp_pkey,
+                modulus,
+                exponent,
+            })
+        }
+
+        #[cfg(not(feature = "ring-io"))]
+        Ok(Self { key: evp_pkey })
     }
 
     fn validate_key(key: &LcPtr<EVP_PKEY>) -> Result<(), Unspecified> {
@@ -182,31 +216,65 @@ impl PublicEncryptingKey {
     /// * `Unspecified` for any error that occurs deserializing from bytes.
     pub fn from_der(value: &[u8]) -> Result<Self, KeyRejected> {
         let key = encoding::rfc5280::decode_public_key_der(value)?;
-        Ok(Self::new(key)?)
+        #[cfg(feature = "ring-io")]
+        {
+            let evp_pkey = key.as_const();
+            let pubkey = evp_pkey.get_rsa()?;
+            let modulus = pubkey
+                .project_const_lifetime(unsafe { |pubkey| RSA_get0_n(pubkey.as_const_ptr()) })?;
+            let modulus = modulus.to_be_bytes().into_boxed_slice();
+            let exponent = pubkey
+                .project_const_lifetime(unsafe { |pubkey| RSA_get0_e(pubkey.as_const_ptr()) })?;
+            let exponent = exponent.to_be_bytes().into_boxed_slice();
+            Ok(Self {
+                key,
+                modulus,
+                exponent,
+            })
+        }
+
+        #[cfg(not(feature = "ring-io"))]
+        Ok(Self { key })
     }
 
     /// Returns the RSA signature size in bytes.
     #[must_use]
     pub fn key_size_bytes(&self) -> usize {
-        self.0.as_const().signature_size_bytes()
+        self.key.as_const().signature_size_bytes()
     }
 
     /// Returns the RSA key size in bits.
     #[must_use]
     pub fn key_size_bits(&self) -> usize {
-        self.0.as_const().key_size_bits()
+        self.key.as_const().key_size_bits()
+    }
+}
+
+#[cfg(feature = "ring-io")]
+impl PublicEncryptingKey {
+    /// The public modulus (n).
+    #[must_use]
+    pub fn modulus(&self) -> io::Positive<'_> {
+        io::Positive::new_non_empty_without_leading_zeros(Input::from(self.modulus.as_ref()))
+    }
+
+    /// The public exponent (e).
+    #[must_use]
+    pub fn exponent(&self) -> io::Positive<'_> {
+        io::Positive::new_non_empty_without_leading_zeros(Input::from(self.exponent.as_ref()))
+    }
+
+    /// Returns the length in bytes of the public modulus.
+    #[must_use]
+    pub fn modulus_len(&self) -> usize {
+        self.modulus.len()
     }
 }
 
 impl Debug for PublicEncryptingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("PublicEncryptingKey").finish()
-    }
-}
-
-impl Clone for PublicEncryptingKey {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
+        f.debug_struct("PublicEncryptingKey")
+            .finish_non_exhaustive()
     }
 }
 
@@ -216,6 +284,6 @@ impl AsDer<PublicKeyX509Der<'static>> for PublicEncryptingKey {
     /// # Errors
     /// * `Unspecified` for any error that occurs serializing to bytes.
     fn as_der(&self) -> Result<PublicKeyX509Der<'static>, Unspecified> {
-        encoding::rfc5280::encode_public_key_der(&self.0)
+        encoding::rfc5280::encode_public_key_der(&self.key)
     }
 }
